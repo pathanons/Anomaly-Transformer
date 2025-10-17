@@ -7,7 +7,7 @@ import time
 from utils.utils import *
 from model.AnomalyTransformer import AnomalyTransformer
 from data_factory.data_loader import get_loader_segment
-
+import matplotlib.pyplot as plt
 
 def my_kl_loss(p, q):
     res = p * (torch.log(p + 0.0001) - torch.log(q + 0.0001))
@@ -31,8 +31,8 @@ class EarlyStopping:
         self.best_score = None
         self.best_score2 = None
         self.early_stop = False
-        self.val_loss_min = np.Inf
-        self.val_loss2_min = np.Inf
+        self.val_loss_min = np.inf
+        self.val_loss2_min = np.inf
         self.delta = delta
         self.dataset = dataset_name
 
@@ -291,10 +291,44 @@ class Solver(object):
         # (3) evaluation on the test set
         test_labels = []
         attens_energy = []
+        all_inputs = []
         for i, (input_data, labels) in enumerate(self.thre_loader):
             input = input_data.float().to(self.device)
             output, series, prior, _ = self.model(input)
+            if i == 0:
+                print(self.model)
+                print("input shape: ", input.shape)
+                print("output shape: ", output.shape)
+                print("Attention length: ", len(series))
+                print(series[0].shape, series[0])
+            # --- Save per-batch inputs and attention matrices ---
+            # Create a folder per k under model_save_path: e.g., checkpoints/attentions_k_3
+            try:
+                k_val = int(self.k)
+            except Exception:
+                k_val = self.k
+            save_root = os.path.join(self.model_save_path, f"attentions_k_{k_val}")
+            if not os.path.exists(save_root):
+                os.makedirs(save_root)
 
+            # Save the raw input batch (numpy array, shape: B, win_size, input_c)
+            try:
+                input_save_path = os.path.join(save_root, f"input_batch_{i:06d}.npy")
+                np.save(input_save_path, input_data.cpu().numpy())
+            except Exception as e:
+                print(f"Warning: failed to save input batch {i}: {e}")
+
+            # Save attention matrices for each layer u (series[u] has shape (B, H, S, S))
+            if series is not None:
+                for u in range(len(series)):
+                    try:
+                        attn_arr = series[u].detach().cpu().numpy()
+                        attn_save_path = os.path.join(save_root, f"attn_layer{u}_batch_{i:06d}.npy")
+                        np.save(attn_save_path, attn_arr)
+                    except Exception as e:
+                        print(f"Warning: failed to save attention for layer {u} batch {i}: {e}")
+            else:
+                print("Warning: series is None, skipping attention save for batch", i)
             loss = torch.mean(criterion(input, output), dim=-1)
 
             series_loss = 0.0
@@ -302,38 +336,80 @@ class Solver(object):
             for u in range(len(prior)):
                 if u == 0:
                     series_loss = my_kl_loss(series[u], (
-                            prior[u] / torch.unsqueeze(torch.sum(prior[u], dim=-1), dim=-1).repeat(1, 1, 1,
-                                                                                                   self.win_size)).detach()) * temperature
+                        prior[u] / torch.unsqueeze(torch.sum(prior[u], dim=-1), dim=-1).repeat(1, 1, 1,
+                                                                                        self.win_size)).detach()) * temperature
                     prior_loss = my_kl_loss(
                         (prior[u] / torch.unsqueeze(torch.sum(prior[u], dim=-1), dim=-1).repeat(1, 1, 1,
-                                                                                                self.win_size)),
+                                                                                        self.win_size)),
                         series[u].detach()) * temperature
+                    
                 else:
                     series_loss += my_kl_loss(series[u], (
-                            prior[u] / torch.unsqueeze(torch.sum(prior[u], dim=-1), dim=-1).repeat(1, 1, 1,
-                                                                                                   self.win_size)).detach()) * temperature
+                        prior[u] / torch.unsqueeze(torch.sum(prior[u], dim=-1), dim=-1).repeat(1, 1, 1,
+                                                        self.win_size)).detach()) * temperature
                     prior_loss += my_kl_loss(
-                        (prior[u] / torch.unsqueeze(torch.sum(prior[u], dim=-1), dim=-1).repeat(1, 1, 1,
-                                                                                                self.win_size)),
-                        series[u].detach()) * temperature
+                    (prior[u] / torch.unsqueeze(torch.sum(prior[u], dim=-1), dim=-1).repeat(1, 1, 1,
+                                                        self.win_size)),
+                    series[u].detach()) * temperature
             metric = torch.softmax((-series_loss - prior_loss), dim=-1)
 
             cri = metric * loss
             cri = cri.detach().cpu().numpy()
             attens_energy.append(cri)
             test_labels.append(labels)
+            all_inputs.append(input_data.cpu().numpy())
 
         attens_energy = np.concatenate(attens_energy, axis=0).reshape(-1)
         test_labels = np.concatenate(test_labels, axis=0).reshape(-1)
+        all_inputs = np.concatenate(all_inputs, axis=0)  # shape: (num_samples, win_size, num_features)
         test_energy = np.array(attens_energy)
         test_labels = np.array(test_labels)
 
         pred = (test_energy > thresh).astype(int)
-
         gt = test_labels.astype(int)
 
         print("pred:   ", pred.shape)
         print("gt:     ", gt.shape)
+
+        # # ====== Plotting input features and test_energy with anomaly highlight ======
+        # # all_inputs shape: (num_samples, win_size, num_features)
+        # # We'll flatten along the batch and window axis for plotting
+        # num_samples, win_size, num_features = all_inputs.shape
+        # total_points = num_samples * win_size
+        # inputs_flat = all_inputs.reshape(-1, num_features)  # shape: (total_points, num_features)
+        # gt_flat = gt[:total_points]  # ground truth labels for each point
+        # test_energy_flat = test_energy[:total_points]  # energy for each point
+
+        # import matplotlib.pyplot as plt
+
+        # save_dir = os.path.join(self.model_save_path, "plots")
+        # if not os.path.exists(save_dir):
+        #     os.makedirs(save_dir)
+
+        # for feat_idx in range(num_features):
+        #     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(18, 6), sharex=True, gridspec_kw={'height_ratios': [2, 1]})
+        #     x = np.arange(total_points)
+        #     # Plot input feature
+        #     ax1.plot(x, inputs_flat[:, feat_idx], label=f'Feature {feat_idx}')
+        #     # Highlight anomalies in input
+        #     ax1.fill_between(x, inputs_flat[:, feat_idx], where=gt_flat == 1, color='red', alpha=0.3, label='Anomaly')
+        #     ax1.set_ylabel('Input Value')
+        #     ax1.set_title(f'Feature {feat_idx} Input with Anomaly Highlight')
+        #     ax1.legend(loc='upper right')
+
+        #     # Plot test_energy
+        #     ax2.plot(x, test_energy_flat, color='purple', label='Test Energy')
+        #     # Highlight anomalies in energy
+        #     ax2.fill_between(x, test_energy_flat, where=gt_flat == 1, color='red', alpha=0.3, label='Anomaly')
+        #     ax2.set_ylabel('Test Energy')
+        #     ax2.set_xlabel('Time Index')
+        #     ax2.set_ylim(bottom=0,top=1.0)
+        #     ax2.set_title('Test Energy with Anomaly Highlight')
+        #     ax2.legend(loc='upper right')
+
+        #     plt.tight_layout()
+        #     plt.savefig(os.path.join(save_dir, f'feature_{feat_idx}_anomaly_plot.png'))
+        #     plt.close()
 
         # detection adjustment: please see this issue for more information https://github.com/thuml/Anomaly-Transformer/issues/14
         anomaly_state = False
