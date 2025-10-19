@@ -24,7 +24,7 @@ def adjust_learning_rate(optimizer, epoch, lr_):
 
 
 class EarlyStopping:
-    def __init__(self, patience=7, verbose=False, dataset_name='', delta=0):
+    def __init__(self, patience=7, verbose=False, dataset_name='', delta=0, win_size=100):
         self.patience = patience
         self.verbose = verbose
         self.counter = 0
@@ -35,6 +35,7 @@ class EarlyStopping:
         self.val_loss2_min = np.inf
         self.delta = delta
         self.dataset = dataset_name
+        self.win_size = win_size
 
     def __call__(self, val_loss, val_loss2, model, path):
         score = -val_loss
@@ -57,7 +58,7 @@ class EarlyStopping:
     def save_checkpoint(self, val_loss, val_loss2, model, path):
         if self.verbose:
             print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
-        torch.save(model.state_dict(), os.path.join(path, str(self.dataset) + '_checkpoint.pth'))
+        torch.save(model.state_dict(), os.path.join(path, str(self.dataset),str(self.win_size),'checkpoint.pth'))
         self.val_loss_min = val_loss
         self.val_loss2_min = val_loss2
 
@@ -134,8 +135,8 @@ class Solver(object):
         time_now = time.time()
         path = self.model_save_path
         if not os.path.exists(path):
-            os.makedirs(path)
-        early_stopping = EarlyStopping(patience=3, verbose=True, dataset_name=self.dataset)
+            os.makedirs(os.path.join(path, str(self.dataset),str(self.win_size)))
+        early_stopping = EarlyStopping(patience=3, verbose=True, dataset_name=self.dataset, win_size=self.win_size)
         train_steps = len(self.train_loader)
 
         for epoch in range(self.num_epochs):
@@ -207,7 +208,7 @@ class Solver(object):
     def test(self):
         self.model.load_state_dict(
             torch.load(
-                os.path.join(str(self.model_save_path), str(self.dataset) + '_checkpoint.pth')))
+                os.path.join(os.path.join(str(self.model_save_path), str(self.dataset),str(self.win_size),'checkpoint.pth'))))
         self.model.eval()
         temperature = 50
 
@@ -307,23 +308,35 @@ class Solver(object):
                 k_val = int(self.k)
             except Exception:
                 k_val = self.k
-            save_root = os.path.join(self.model_save_path, f"attentions_k_{k_val}")
+            save_root = os.path.join(str(self.model_save_path), str(self.dataset),str(self.win_size), f"values")
             if not os.path.exists(save_root):
-                os.makedirs(save_root)
+                os.makedirs(os.path.join(save_root,'inputs'), exist_ok=True)
+                if self.isLabelled:
+                    os.makedirs(os.path.join(save_root,'labels'), exist_ok=True)
+                os.makedirs(os.path.join(save_root,'attentions'), exist_ok=True)
+                os.makedirs(os.path.join(save_root,'crits'), exist_ok=True)
 
             # Save the raw input batch (numpy array, shape: B, win_size, input_c)
             try:
-                input_save_path = os.path.join(save_root, f"input_batch_{i:06d}.npy")
+                input_save_path = os.path.join(save_root,'inputs', f"batch_{i:06d}.npy")
                 np.save(input_save_path, input_data.cpu().numpy())
             except Exception as e:
                 print(f"Warning: failed to save input batch {i}: {e}")
+
+            # Save the raw input batch (numpy array, shape: B, win_size, input_c)
+            if self.isLabelled:
+                try:
+                    labels_save_path = os.path.join(save_root,'labels', f"batch_{i:06d}.npy")
+                    np.save(labels_save_path, labels.cpu().numpy())
+                except Exception as e:
+                    print(f"Warning: failed to save labels batch {i}: {e}")
 
             # Save attention matrices for each layer u (series[u] has shape (B, H, S, S))
             if series is not None:
                 for u in range(len(series)):
                     try:
                         attn_arr = series[u].detach().cpu().numpy()
-                        attn_save_path = os.path.join(save_root, f"attn_layer{u}_batch_{i:06d}.npy")
+                        attn_save_path = os.path.join(save_root, 'attentions', f"layer{u}_batch_{i:06d}.npy")
                         np.save(attn_save_path, attn_arr)
                     except Exception as e:
                         print(f"Warning: failed to save attention for layer {u} batch {i}: {e}")
@@ -355,6 +368,11 @@ class Solver(object):
 
             cri = metric * loss
             cri = cri.detach().cpu().numpy()
+            try:
+                cri_save_path = os.path.join(save_root, 'crits', f"batch_{i:06d}.npy")
+                np.save(cri_save_path, cri)
+            except Exception as e:
+                print(f"Warning: failed to save crit for batch {i}: {e}")
             attens_energy.append(cri)
             test_labels.append(labels)
             all_inputs.append(input_data.cpu().numpy())
@@ -370,46 +388,6 @@ class Solver(object):
 
         print("pred:   ", pred.shape)
         print("gt:     ", gt.shape)
-
-        # # ====== Plotting input features and test_energy with anomaly highlight ======
-        # # all_inputs shape: (num_samples, win_size, num_features)
-        # # We'll flatten along the batch and window axis for plotting
-        # num_samples, win_size, num_features = all_inputs.shape
-        # total_points = num_samples * win_size
-        # inputs_flat = all_inputs.reshape(-1, num_features)  # shape: (total_points, num_features)
-        # gt_flat = gt[:total_points]  # ground truth labels for each point
-        # test_energy_flat = test_energy[:total_points]  # energy for each point
-
-        # import matplotlib.pyplot as plt
-
-        # save_dir = os.path.join(self.model_save_path, "plots")
-        # if not os.path.exists(save_dir):
-        #     os.makedirs(save_dir)
-
-        # for feat_idx in range(num_features):
-        #     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(18, 6), sharex=True, gridspec_kw={'height_ratios': [2, 1]})
-        #     x = np.arange(total_points)
-        #     # Plot input feature
-        #     ax1.plot(x, inputs_flat[:, feat_idx], label=f'Feature {feat_idx}')
-        #     # Highlight anomalies in input
-        #     ax1.fill_between(x, inputs_flat[:, feat_idx], where=gt_flat == 1, color='red', alpha=0.3, label='Anomaly')
-        #     ax1.set_ylabel('Input Value')
-        #     ax1.set_title(f'Feature {feat_idx} Input with Anomaly Highlight')
-        #     ax1.legend(loc='upper right')
-
-        #     # Plot test_energy
-        #     ax2.plot(x, test_energy_flat, color='purple', label='Test Energy')
-        #     # Highlight anomalies in energy
-        #     ax2.fill_between(x, test_energy_flat, where=gt_flat == 1, color='red', alpha=0.3, label='Anomaly')
-        #     ax2.set_ylabel('Test Energy')
-        #     ax2.set_xlabel('Time Index')
-        #     ax2.set_ylim(bottom=0,top=1.0)
-        #     ax2.set_title('Test Energy with Anomaly Highlight')
-        #     ax2.legend(loc='upper right')
-
-        #     plt.tight_layout()
-        #     plt.savefig(os.path.join(save_dir, f'feature_{feat_idx}_anomaly_plot.png'))
-        #     plt.close()
 
         # detection adjustment: please see this issue for more information https://github.com/thuml/Anomaly-Transformer/issues/14
         anomaly_state = False

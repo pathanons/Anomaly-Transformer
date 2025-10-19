@@ -208,6 +208,8 @@ def get_loader_segment(data_path, batch_size, win_size=100, step=100, mode='trai
         dataset = SMAPSegLoader(data_path, win_size, 1, mode)
     elif (dataset == 'PSM'):
         dataset = PSMSegLoader(data_path, win_size, 1, mode)
+    elif (dataset == 'SAW'):
+        dataset = PSMSegLoader(data_path, win_size, 1, mode)
 
     shuffle = False
     if mode == 'train':

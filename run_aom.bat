@@ -1,2 +1,2 @@
-python main.py --anormly_ratio 1 --num_epochs 3    --batch_size 16  --mode train --dataset PSM  --data_path dataset/SIGNAL --input_c 1    --output_c 1 --win_size 500
-python main.py --anormly_ratio 1  --num_epochs 10       --batch_size 16     --mode test    --dataset PSM   --data_path dataset/SIGNAL  --input_c 1    --output_c 1  --pretrained_model 20 --win_size 500
+python main.py --anormly_ratio 1 --num_epochs 3    --batch_size 32  --mode train --dataset PSM  --data_path datasets/SAW --input_c 1    --output_c 1 --win_size 110 --isLabelled True
+python main.py --anormly_ratio 1  --num_epochs 10       --batch_size 32     --mode test    --dataset PSM   --data_path datasets/SAW  --input_c 1    --output_c 1  --pretrained_model 20 --win_size 110 --isLabelled True

@@ -13,8 +13,8 @@ def str2bool(v):
 
 def main(config):
     cudnn.benchmark = True
-    if (not os.path.exists(config.model_save_path)):
-        mkdir(config.model_save_path)
+    if (not os.path.exists(os.path.join(config.model_save_path,config.dataset,str(config.win_size),'checkpoint.pth')))&(config.mode=='train'):
+        mkdir(os.path.join(config.model_save_path,config.dataset,str(config.win_size)))
     solver = Solver(vars(config))
 
     if config.mode == 'train':
@@ -41,6 +41,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_path', type=str, default='./dataset/creditcard_ts.csv')
     parser.add_argument('--model_save_path', type=str, default='checkpoints')
     parser.add_argument('--anormly_ratio', type=float, default=4.00)
+    parser.add_argument('--isLabelled',type=bool,default=False)
 
     config = parser.parse_args()
 
