@@ -83,9 +83,17 @@ class Solver(object):
                                               mode='thre',
                                               dataset=self.dataset)
 
-        # Choose device before creating/initializing model so we can move model to the same device
-        # self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        # Robust device selection: CUDA > MPS > CPU
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda:0")
+            device_str = "cuda:0"
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+            device_str = "mps"
+        else:
+            self.device = torch.device("cpu")
+            device_str = "cpu"
+        print(f"[INFO] Using device: {device_str}")
         self.criterion = nn.MSELoss()
         self.build_model()
 
