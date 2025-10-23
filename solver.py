@@ -84,8 +84,8 @@ class Solver(object):
                                               dataset=self.dataset)
 
         # Choose device before creating/initializing model so we can move model to the same device
-        self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.criterion = nn.MSELoss()
         self.build_model()
 
