@@ -8,7 +8,7 @@ import os
 
 
 class TriangularCausalMask():
-    def __init__(self, B, L, device="cpu"):
+    def __init__(self, B, L, device="mps"):
         mask_shape = [B, 1, L, L]
         with torch.no_grad():
             self._mask = torch.triu(torch.ones(mask_shape, dtype=torch.bool), diagonal=1).to(device)
@@ -19,14 +19,14 @@ class TriangularCausalMask():
 
 
 class AnomalyAttention(nn.Module):
-    def __init__(self, win_size, mask_flag=True, scale=None, attention_dropout=0.0, output_attention=False):
+    def __init__(self, win_size, mask_flag=True, scale=None, attention_dropout=0.0, output_attention=False,device="mps"):
         super(AnomalyAttention, self).__init__()
         self.scale = scale
         self.mask_flag = mask_flag
         self.output_attention = output_attention
         self.dropout = nn.Dropout(attention_dropout)
         window_size = win_size
-        self.distances = torch.zeros((window_size, window_size)).cuda()
+        self.distances = torch.zeros((window_size, window_size)).to(device)#cuda()
         for i in range(window_size):
             for j in range(window_size):
                 self.distances[i][j] = abs(i - j)

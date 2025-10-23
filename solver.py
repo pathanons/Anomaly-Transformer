@@ -83,16 +83,45 @@ class Solver(object):
                                               mode='thre',
                                               dataset=self.dataset)
 
-        self.build_model()
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        # Choose device before creating/initializing model so we can move model to the same device
+        self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.criterion = nn.MSELoss()
+        self.build_model()
 
     def build_model(self):
-        self.model = AnomalyTransformer(win_size=self.win_size, enc_in=self.input_c, c_out=self.output_c, e_layers=3)
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        # Use hyperparameters from config if provided, otherwise fall back to model defaults
+        d_model = getattr(self, 'd_model', None)
+        n_heads = getattr(self, 'n_heads', None)
+        e_layers = getattr(self, 'e_layers', None)
+        d_ff = getattr(self, 'd_ff', None)
+        dropout = getattr(self, 'dropout', 0.0)
 
-        if torch.cuda.is_available():
-            self.model.cuda()
+        # Build model with provided hyperparameters
+        model_kwargs = {}
+        if d_model is not None:
+            model_kwargs['d_model'] = d_model
+        if n_heads is not None:
+            model_kwargs['n_heads'] = n_heads
+        if e_layers is not None:
+            model_kwargs['e_layers'] = e_layers
+        if d_ff is not None:
+            model_kwargs['d_ff'] = d_ff
+        if dropout is not None:
+            model_kwargs['dropout'] = dropout
+
+        # Instantiate model
+        self.model = AnomalyTransformer(win_size=self.win_size, enc_in=self.input_c, c_out=self.output_c, **model_kwargs)
+
+        # Move model to the configured device (handles 'mps' and 'cuda') before creating optimizer
+        try:
+            self.model.to(self.device)
+        except Exception:
+            # fallback: if device transfer fails, leave on CPU and let runtime raise later
+            pass
+
+        # Create optimizer after model is on the correct device so parameter tensors match
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
     def vali(self, vali_loader):
         self.model.eval()
@@ -206,9 +235,12 @@ class Solver(object):
             adjust_learning_rate(self.optimizer, epoch + 1, self.lr)
 
     def test(self):
+        ckpt_path = os.path.join(str(self.model_save_path), str(self.dataset), str(self.win_size), 'checkpoint.pth')
+        if not os.path.exists(ckpt_path):
+            print(f"Checkpoint not found at {ckpt_path}. Please run training first or provide --pretrained_model path.")
+            return None
         self.model.load_state_dict(
-            torch.load(
-                os.path.join(os.path.join(str(self.model_save_path), str(self.dataset),str(self.win_size),'checkpoint.pth'))))
+            torch.load(ckpt_path))
         self.model.eval()
         temperature = 50
 
