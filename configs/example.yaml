@@ -4,7 +4,7 @@
 # data/training
 dataset: SAW
 data_path: ./dataset/SAW2
-mode: test          # 'train' or 'test'
+mode: train       # 'train' or 'test'
 win_size: 120
 input_c: 1
 output_c: 1

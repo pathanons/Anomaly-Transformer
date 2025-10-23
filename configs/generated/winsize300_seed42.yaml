@@ -10,8 +10,8 @@ e_layers: 3
 input_c: 1
 isLabelled: true
 lr: 1e-3
-mode: test
-model_save_path: checkpoints
+mode: train
+model_save_path: /content/drive/MyDrive/anomaly_runs/winsize_sweep
 n_heads: 8
 num_epochs: 10
 output_c: 1
